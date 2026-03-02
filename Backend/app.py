@@ -182,21 +182,36 @@ def add_transaction():
 @jwt_required()
 def get_transactions():
     user_id = get_jwt_identity()
+    account_id = request.args.get("account_id")  # Optional filter
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute(
-            """
-            SELECT id, amount, category, description, date, created_at,
-                   plaid_transaction_id, source
-            FROM transactions
-            WHERE user_id = %s
-            ORDER BY date DESC
-            """,
-            (int(user_id),)
-        )
+        if account_id:
+            cur.execute(
+                """
+                SELECT id, amount, category, description, date, created_at,
+                       plaid_transaction_id, source, plaid_account_id,
+                       institution_name, account_name
+                FROM transactions
+                WHERE user_id = %s AND plaid_account_id = %s
+                ORDER BY date DESC
+                """,
+                (int(user_id), account_id)
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, amount, category, description, date, created_at,
+                       plaid_transaction_id, source, plaid_account_id,
+                       institution_name, account_name
+                FROM transactions
+                WHERE user_id = %s
+                ORDER BY date DESC
+                """,
+                (int(user_id),)
+            )
 
         rows = cur.fetchall()
 
@@ -210,7 +225,10 @@ def get_transactions():
                 "date": str(row[4]),
                 "created_at": str(row[5]),
                 "plaid_transaction_id": row[6],
-                "source": row[7] or "manual"
+                "source": row[7] or "manual",
+                "plaid_account_id": row[8],
+                "institution_name": row[9],
+                "account_name": row[10]
             })
 
         return jsonify(transactions)
@@ -357,7 +375,7 @@ def exchange_token():
 @app.route("/plaid/sync_transactions", methods=["POST"])
 @jwt_required()
 def sync_transactions():
-    """Fetch transactions from Plaid using cursor-based sync and store them."""
+    """Fetch transactions from Plaid using cursor-based sync and store them with account-level detail."""
     user_id = get_jwt_identity()
 
     conn = get_db_connection()
@@ -366,7 +384,7 @@ def sync_transactions():
     try:
         # Get all linked Plaid items for this user
         cur.execute(
-            "SELECT id, access_token, cursor FROM plaid_items WHERE user_id = %s",
+            "SELECT id, access_token, cursor, institution_name FROM plaid_items WHERE user_id = %s",
             (int(user_id),)
         )
         items = cur.fetchall()
@@ -379,8 +397,18 @@ def sync_transactions():
         total_removed = 0
 
         for item_row in items:
-            plaid_item_id, encrypted_token, saved_cursor = item_row
+            plaid_item_id, encrypted_token, saved_cursor, inst_name = item_row
             access_token = decrypt_token(encrypted_token)
+
+            # ── Fetch account names for this item so we can tag each transaction ──
+            account_name_map = {}
+            try:
+                acct_req = AccountsGetRequest(access_token=access_token)
+                acct_resp = plaid_client.accounts_get(acct_req)
+                for acct in acct_resp["accounts"]:
+                    account_name_map[acct["account_id"]] = acct["name"]
+            except plaid.ApiException:
+                pass  # If accounts fetch fails, we'll use empty names
 
             cursor = saved_cursor or ""
             has_more = True
@@ -400,38 +428,55 @@ def sync_transactions():
                 # Process ADDED transactions
                 for txn in response["added"]:
                     plaid_txn_id = txn["transaction_id"]
+                    plaid_account_id = txn["account_id"]
                     amount = -txn["amount"]  # Plaid uses negative for income, we flip
                     category = txn["personal_finance_category"]["primary"] if txn.get("personal_finance_category") else (txn["category"][0] if txn.get("category") else "Uncategorized")
                     description = txn.get("name", "")
                     date = str(txn["date"])
+                    acct_name = account_name_map.get(plaid_account_id, "")
 
-                    # Upsert: insert or skip if already exists
+                    # Upsert: insert or update on conflict
                     cur.execute(
                         """
                         INSERT INTO transactions
-                        (user_id, amount, category, description, date, plaid_transaction_id, source, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'plaid', NOW())
-                        ON CONFLICT (plaid_transaction_id) DO NOTHING
+                        (user_id, amount, category, description, date,
+                         plaid_transaction_id, source, plaid_account_id,
+                         institution_name, account_name, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'plaid', %s, %s, %s, NOW())
+                        ON CONFLICT (plaid_transaction_id) DO UPDATE SET
+                            amount = EXCLUDED.amount,
+                            category = EXCLUDED.category,
+                            description = EXCLUDED.description,
+                            date = EXCLUDED.date,
+                            plaid_account_id = EXCLUDED.plaid_account_id,
+                            institution_name = EXCLUDED.institution_name,
+                            account_name = EXCLUDED.account_name
                         """,
-                        (int(user_id), amount, category, description, date, plaid_txn_id)
+                        (int(user_id), amount, category, description, date,
+                         plaid_txn_id, plaid_account_id, inst_name, acct_name)
                     )
                     total_added += 1
 
                 # Process MODIFIED transactions
                 for txn in response["modified"]:
                     plaid_txn_id = txn["transaction_id"]
+                    plaid_account_id = txn["account_id"]
                     amount = -txn["amount"]
                     category = txn["personal_finance_category"]["primary"] if txn.get("personal_finance_category") else (txn["category"][0] if txn.get("category") else "Uncategorized")
                     description = txn.get("name", "")
                     date = str(txn["date"])
+                    acct_name = account_name_map.get(plaid_account_id, "")
 
                     cur.execute(
                         """
                         UPDATE transactions
-                        SET amount = %s, category = %s, description = %s, date = %s
+                        SET amount = %s, category = %s, description = %s, date = %s,
+                            plaid_account_id = %s, institution_name = %s, account_name = %s
                         WHERE plaid_transaction_id = %s AND user_id = %s
                         """,
-                        (amount, category, description, date, plaid_txn_id, int(user_id))
+                        (amount, category, description, date,
+                         plaid_account_id, inst_name, acct_name,
+                         plaid_txn_id, int(user_id))
                     )
                     total_modified += 1
 
@@ -530,13 +575,11 @@ def get_plaid_accounts():
         conn.close()
 
 
-@app.route("/plaid/disconnect", methods=["DELETE"])
+@app.route("/plaid/disconnect/<item_id>", methods=["DELETE"])
 @jwt_required()
-def disconnect_plaid():
-    """Revoke Plaid access and remove the linked bank item."""
+def disconnect_plaid(item_id):
+    """Revoke Plaid access and remove only this specific linked bank item and its transactions."""
     user_id = get_jwt_identity()
-    data = request.json
-    item_id = data.get("item_id")
 
     if not item_id:
         return jsonify({"error": "item_id is required"}), 400
@@ -545,7 +588,7 @@ def disconnect_plaid():
     cur = conn.cursor()
 
     try:
-        # Get the access token for this item
+        # Get the access token for this item (ownership check)
         cur.execute(
             "SELECT access_token FROM plaid_items WHERE item_id = %s AND user_id = %s",
             (item_id, int(user_id))
@@ -558,25 +601,41 @@ def disconnect_plaid():
         encrypted_token = row[0]
         access_token = decrypt_token(encrypted_token)
 
-        # Revoke the access token with Plaid
+        # ── Step 1: Get account IDs belonging to this item ──
+        account_ids = []
+        try:
+            acct_req = AccountsGetRequest(access_token=access_token)
+            acct_resp = plaid_client.accounts_get(acct_req)
+            account_ids = [a["account_id"] for a in acct_resp["accounts"]]
+        except plaid.ApiException:
+            pass  # If fetch fails, fall back to deleting by item association
+
+        # ── Step 2: Revoke the access token with Plaid ──
         try:
             remove_request = ItemRemoveRequest(access_token=access_token)
             plaid_client.item_remove(remove_request)
         except plaid.ApiException:
             pass  # Item may already be invalid; continue cleanup
 
-        # Delete Plaid-sourced transactions for this item
-        cur.execute(
-            """
-            DELETE FROM transactions
-            WHERE user_id = %s AND source = 'plaid'
-            AND plaid_transaction_id IS NOT NULL
-            """,
-            (int(user_id),)
-        )
-        removed_txns = cur.rowcount
+        # ── Step 3: Delete ONLY transactions belonging to this item's accounts ──
+        removed_txns = 0
+        if account_ids:
+            placeholders = ",".join(["%s"] * len(account_ids))
+            cur.execute(
+                f"""
+                DELETE FROM transactions
+                WHERE user_id = %s AND source = 'plaid'
+                AND plaid_account_id IN ({placeholders})
+                """,
+                [int(user_id)] + account_ids
+            )
+            removed_txns = cur.rowcount
+        else:
+            # Fallback: if we couldn't fetch accounts, remove nothing extra
+            # (transactions without account_id mapping are orphaned already)
+            pass
 
-        # Delete the plaid item record
+        # ── Step 4: Delete the plaid item record ──
         cur.execute(
             "DELETE FROM plaid_items WHERE item_id = %s AND user_id = %s",
             (item_id, int(user_id))

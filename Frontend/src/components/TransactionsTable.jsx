@@ -1,4 +1,4 @@
-import { ClipboardList } from 'lucide-react';
+import { ClipboardList, Building2 } from 'lucide-react';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-US', {
@@ -41,6 +41,16 @@ function formatCategory(category) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function formatAccountLabel(txn) {
+  if (txn.source !== 'plaid') return null;
+  const inst = txn.institution_name || '';
+  const acct = txn.account_name || '';
+  if (inst && acct) return `${inst} – ${acct}`;
+  if (inst) return inst;
+  if (acct) return acct;
+  return 'Bank Account';
+}
+
 export default function TransactionsTable({ transactions }) {
   if (!transactions || transactions.length === 0) {
     return (
@@ -65,6 +75,9 @@ export default function TransactionsTable({ transactions }) {
                 Description
               </th>
               <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5 sticky top-0 backdrop-blur-xl bg-white/5">
+                Account
+              </th>
+              <th className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5 sticky top-0 backdrop-blur-xl bg-white/5">
                 Category
               </th>
               <th className="text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-5 py-3.5 sticky top-0 backdrop-blur-xl bg-white/5">
@@ -76,41 +89,55 @@ export default function TransactionsTable({ transactions }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
-            {transactions.map((txn) => (
-              <tr key={txn.id} className="hover:bg-white/[0.03] transition-colors">
-                <td className="px-5 py-3.5 text-sm text-slate-300 whitespace-nowrap">
-                  {formatDate(txn.date)}
-                </td>
-                <td className="px-5 py-3.5 text-sm text-white font-medium max-w-[250px] truncate">
-                  {txn.description}
-                </td>
-                <td className="px-5 py-3.5">
-                  <span
-                    className={`inline-block text-[11px] font-medium px-2.5 py-1 rounded-full border ${getCategoryColor(txn.category)}`}
-                  >
-                    {formatCategory(txn.category)}
-                  </span>
-                </td>
-                <td
-                  className={`px-5 py-3.5 text-sm font-semibold text-right whitespace-nowrap ${
-                    txn.amount >= 0 ? 'text-emerald-400' : 'text-slate-200'
-                  }`}
-                >
-                  {formatCurrency(txn.amount)}
-                </td>
-                <td className="px-5 py-3.5 text-center">
-                  <span
-                    className={`inline-block text-[11px] font-medium px-2.5 py-0.5 rounded-md border ${
-                      txn.source === 'plaid'
-                        ? 'bg-indigo-400/10 text-indigo-400 border-indigo-400/20'
-                        : 'bg-white/5 text-slate-400 border-white/10'
+            {transactions.map((txn) => {
+              const accountLabel = formatAccountLabel(txn);
+
+              return (
+                <tr key={txn.id} className="hover:bg-white/[0.03] transition-colors">
+                  <td className="px-5 py-3.5 text-sm text-slate-300 whitespace-nowrap">
+                    {formatDate(txn.date)}
+                  </td>
+                  <td className="px-5 py-3.5 text-sm text-white font-medium max-w-[220px] truncate">
+                    {txn.description}
+                  </td>
+                  <td className="px-5 py-3.5 text-sm whitespace-nowrap">
+                    {accountLabel ? (
+                      <span className="inline-flex items-center gap-1.5 text-slate-300">
+                        <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span className="truncate max-w-[160px]">{accountLabel}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-xs">Manual</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span
+                      className={`inline-block text-[11px] font-medium px-2.5 py-1 rounded-full border ${getCategoryColor(txn.category)}`}
+                    >
+                      {formatCategory(txn.category)}
+                    </span>
+                  </td>
+                  <td
+                    className={`px-5 py-3.5 text-sm font-semibold text-right whitespace-nowrap ${
+                      txn.amount >= 0 ? 'text-emerald-400' : 'text-slate-200'
                     }`}
                   >
-                    {txn.source === 'plaid' ? 'Bank' : 'Manual'}
-                  </span>
-                </td>
-              </tr>
-            ))}
+                    {formatCurrency(txn.amount)}
+                  </td>
+                  <td className="px-5 py-3.5 text-center">
+                    <span
+                      className={`inline-block text-[11px] font-medium px-2.5 py-0.5 rounded-md border ${
+                        txn.source === 'plaid'
+                          ? 'bg-indigo-400/10 text-indigo-400 border-indigo-400/20'
+                          : 'bg-white/5 text-slate-400 border-white/10'
+                      }`}
+                    >
+                      {txn.source === 'plaid' ? 'Bank' : 'Manual'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
