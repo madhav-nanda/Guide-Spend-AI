@@ -36,7 +36,7 @@ export default function Register() {
     try {
       await register(name, email, password);
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed. Please try again.');
+      setError(err.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Landmark, CreditCard, Building2, TrendingUp, Unplug, Loader2, X, AlertTriangle } from 'lucide-react';
-import API from '../api/axios';
+import { plaidApi } from '../api/plaidApi';
 
 const typeConfig = {
   depository: { icon: Landmark, color: 'text-teal-400', bg: 'bg-teal-400/10' },
@@ -23,16 +23,18 @@ export default function BalanceCard({ account, onDisconnect }) {
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleDisconnect = async () => {
+    if (disconnecting) return; // Prevent double-click
     setDisconnecting(true);
+    setError(null);
     try {
-      await API.delete(`/plaid/disconnect/${account.item_id}`);
+      await plaidApi.disconnect(account.item_id);
       setShowConfirm(false);
       if (onDisconnect) onDisconnect();
     } catch (err) {
-      console.error('Failed to disconnect:', err);
-      alert('Failed to disconnect account. Please try again.');
+      setError(err.message || 'Failed to disconnect account');
     } finally {
       setDisconnecting(false);
     }
@@ -126,6 +128,13 @@ export default function BalanceCard({ account, onDisconnect }) {
               and permanently remove all associated transactions from your dashboard.
             </p>
             <p className="text-xs text-slate-500 mt-2">This action cannot be undone.</p>
+
+            {/* Error display */}
+            {error && (
+              <div className="mt-3 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                <p className="text-xs text-rose-300">{error}</p>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center gap-3 mt-6">

@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import API from '../api/axios';
+import { authApi } from '../api/authApi';
 
 const AuthContext = createContext(null);
 
@@ -12,42 +12,43 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // Verify token is still valid on mount
     if (token) {
-      API.get('/protected')
+      authApi
+        .verifyToken()
         .then(() => setIsLoading(false))
         .catch(() => {
-          logout();
+          // Token invalid / expired — clear it
+          localStorage.removeItem('token');
+          setToken(null);
           setIsLoading(false);
         });
     } else {
       setIsLoading(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const login = async (email, password) => {
-    const res = await API.post('/login', { email, password });
-    const accessToken = res.data.access_token;
-    localStorage.setItem('token', accessToken);
-    setToken(accessToken);
+  const login = useCallback(async (email, password) => {
+    const data = await authApi.login(email, password);
+    localStorage.setItem('token', data.access_token);
+    setToken(data.access_token);
     navigate('/dashboard');
-    return res.data;
-  };
+    return data;
+  }, [navigate]);
 
-  const register = async (username, email, password) => {
-    await API.post('/register', { username, email, password });
+  const register = useCallback(async (username, email, password) => {
+    await authApi.register(username, email, password);
     // Auto-login after successful registration
-    const res = await API.post('/login', { email, password });
-    const accessToken = res.data.access_token;
-    localStorage.setItem('token', accessToken);
-    setToken(accessToken);
+    const data = await authApi.login(email, password);
+    localStorage.setItem('token', data.access_token);
+    setToken(data.access_token);
     navigate('/dashboard');
-    return res.data;
-  };
+    return data;
+  }, [navigate]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
     navigate('/login');
-  };
+  }, [navigate]);
 
   const isAuthenticated = !!token;
 

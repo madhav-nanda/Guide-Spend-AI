@@ -1,4 +1,4 @@
-import { ClipboardList, Building2 } from 'lucide-react';
+import { ClipboardList, Building2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-US', {
@@ -51,19 +51,44 @@ function formatAccountLabel(txn) {
   return 'Bank Account';
 }
 
-export default function TransactionsTable({ transactions }) {
+export default function TransactionsTable({
+  transactions,
+  pagination,
+  loading,
+  onNextPage,
+  onPrevPage,
+}) {
+  const { page = 1, total_pages = 1, total = 0 } = pagination || {};
+
   if (!transactions || transactions.length === 0) {
     return (
       <div className="backdrop-blur-xl bg-white/5 rounded-2xl border border-white/10 p-12 text-center">
-        <ClipboardList className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-        <p className="text-slate-400">No transactions yet.</p>
-        <p className="text-slate-500 text-sm mt-1">Connect a bank account to import transactions.</p>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 text-slate-400">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span>Loading transactions...</span>
+          </div>
+        ) : (
+          <>
+            <ClipboardList className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <p className="text-slate-400">No transactions yet.</p>
+            <p className="text-slate-500 text-sm mt-1">Connect a bank account to import transactions.</p>
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <div className="backdrop-blur-xl bg-white/5 rounded-2xl border border-white/10 overflow-hidden shadow-xl">
+      {/* Loading overlay for page transitions */}
+      {loading && (
+        <div className="px-5 py-2 bg-teal-500/5 border-b border-teal-500/10 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" />
+          <span className="text-xs text-teal-400">Loading...</span>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
@@ -142,11 +167,41 @@ export default function TransactionsTable({ transactions }) {
         </table>
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-white/5 px-5 py-3 bg-white/[0.02]">
+      {/* ── Footer with Pagination Controls ── */}
+      <div className="border-t border-white/5 px-5 py-3 bg-white/[0.02] flex items-center justify-between">
         <p className="text-xs text-slate-500">
-          Showing {transactions.length} transaction{transactions.length !== 1 ? 's' : ''}
+          {total > 0
+            ? `Showing ${(page - 1) * (pagination?.per_page || 50) + 1}–${Math.min(
+                page * (pagination?.per_page || 50),
+                total
+              )} of ${total}`
+            : `${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`}
         </p>
+
+        {total_pages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onPrevPage}
+              disabled={page <= 1 || loading}
+              className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Prev
+            </button>
+            <span className="text-xs text-slate-400 px-2">
+              Page <span className="text-white font-medium">{page}</span> of{' '}
+              <span className="text-white font-medium">{total_pages}</span>
+            </span>
+            <button
+              onClick={onNextPage}
+              disabled={page >= total_pages || loading}
+              className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

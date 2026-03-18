@@ -1,72 +1,134 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import API from '../api/axios';
+import { useAccount } from '../context/AccountContext';
+import { useAccounts } from '../hooks/useAccounts';
+import { useTransactions } from '../hooks/useTransactions';
+import { useTimeRangeInsights } from '../hooks/useTimeRangeInsights';
+import { useSubscriptions } from '../hooks/useSubscriptions';
+import { useCashflowForecast } from '../hooks/useCashflowForecast';
+import { useHealthScore } from '../hooks/useHealthScore';
 import BackgroundLayer from '../components/BackgroundLayer';
 import BalanceCard from '../components/BalanceCard';
 import ConnectBankButton from '../components/ConnectBankButton';
 import TransactionsTable from '../components/TransactionsTable';
 import Charts from '../components/Charts';
-import { Sparkles, LogOut, Filter } from 'lucide-react';
+import InsightsCard from '../components/InsightsCard';
+import SubscriptionsCard from '../components/SubscriptionsCard';
+import CashflowCard from '../components/CashflowCard';
+import HealthScoreCard from '../components/HealthScoreCard';
+import { Sparkles, LogOut, Filter, AlertCircle } from 'lucide-react';
 
 export default function Dashboard() {
   const { logout } = useAuth();
-  const [accounts, setAccounts] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedAccountId, setSelectedAccountId] = useState('all');
+  const { selectedAccountId, setSelectedAccount, resetAccount } = useAccount();
+  const { validAccounts, loading: accountsLoading, error: accountsError, fetchAccounts } = useAccounts();
+  const {
+    transactions,
+    pagination,
+    loading: txnsLoading,
+    error: txnsError,
+    fetchTransactions,
+    nextPage,
+    prevPage,
+  } = useTransactions();
+  const {
+    data: insightsData,
+    loading: insightsLoading,
+    error: insightsError,
+    refresh: refreshInsights,
+    mode: insightsMode,
+    setMode: setInsightsMode,
+    prevPeriod,
+    nextPeriod,
+    canGoNext,
+    goToToday,
+    rollingDays,
+    setRollingDays,
+    customStart,
+    customEnd,
+    setCustomRange,
+    applyCustomRange,
+  } = useTimeRangeInsights();
+  const {
+    subscriptions,
+    count: subscriptionCount,
+    loading: subsLoading,
+    error: subsError,
+    refresh: refreshSubscriptions,
+    recompute: recomputeSubscriptions,
+    recomputing: subsRecomputing,
+  } = useSubscriptions();
 
-  // ── Fetch dashboard data (accounts always full, transactions filtered) ──
-  const fetchDashboardData = useCallback(async (accountFilter = 'all') => {
-    setLoading(true);
-    try {
-      const transactionsUrl =
-        accountFilter && accountFilter !== 'all'
-          ? `/transactions?account_id=${accountFilter}`
-          : '/transactions';
+  // ── Cashflow: pass totalBalance as starting balance ──
+  // (will be set after accounts load; useCashflowForecast re-fetches when it changes)
+  const {
+    forecast: cashflowForecast,
+    loading: cashflowLoading,
+    error: cashflowError,
+    refresh: refreshCashflow,
+    horizonDays,
+    setHorizonDays,
+  } = useCashflowForecast(null); // balance passed after render via totalBalance
 
-      const [accountsRes, transactionsRes] = await Promise.all([
-        API.get('/plaid/accounts'),
-        API.get(transactionsUrl),
-      ]);
-      setAccounts(accountsRes.data.accounts || []);
-      setTransactions(transactionsRes.data || []);
-    } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // ── Health Score: pass totalBalance as current balance ──
+  const {
+    healthScore: healthScoreData,
+    loading: healthLoading,
+    error: healthError,
+    refresh: refreshHealthScore,
+    windowDays: healthWindowDays,
+    setWindowDays: setHealthWindowDays,
+  } = useHealthScore(null); // balance passed after render via totalBalance
+
+  // ── Initial fetch on mount + when account filter changes ──
+  useEffect(() => {
+    fetchAccounts();
+  }, [fetchAccounts]);
 
   useEffect(() => {
-    fetchDashboardData(selectedAccountId);
-  }, [fetchDashboardData, selectedAccountId]);
+    fetchTransactions({
+      page: 1,
+      account_id: selectedAccountId,
+    });
+  }, [selectedAccountId, fetchTransactions]);
 
-  // ── Handle account filter change ──
-  const handleFilterChange = (accountId) => {
-    setSelectedAccountId(accountId);
-  };
+  // ── After connecting a new bank ──
+  const handleBankConnected = useCallback(() => {
+    resetAccount();
+    fetchAccounts();
+    fetchTransactions({ page: 1, account_id: 'all' });
+    refreshInsights();
+    refreshSubscriptions();
+    refreshCashflow();
+    refreshHealthScore();
+  }, [resetAccount, fetchAccounts, fetchTransactions, refreshInsights, refreshSubscriptions, refreshCashflow, refreshHealthScore]);
 
-  // ── After connecting a new bank, reset filter to all ──
-  const handleBankConnected = () => {
-    setSelectedAccountId('all');
-    fetchDashboardData('all');
-  };
+  // ── After disconnecting a bank ──
+  const handleDisconnect = useCallback(() => {
+    resetAccount();
+    fetchAccounts();
+    fetchTransactions({ page: 1, account_id: 'all' });
+    refreshInsights();
+    refreshSubscriptions();
+    refreshCashflow();
+    refreshHealthScore();
+  }, [resetAccount, fetchAccounts, fetchTransactions, refreshInsights, refreshSubscriptions, refreshCashflow, refreshHealthScore]);
 
-  // ── After disconnecting a bank, reset filter to all ──
-  const handleDisconnect = () => {
-    setSelectedAccountId('all');
-    fetchDashboardData('all');
-  };
+  // ── Handle page navigation (preserves selected account) ──
+  const handleNextPage = useCallback(() => {
+    nextPage(selectedAccountId);
+  }, [nextPage, selectedAccountId]);
 
-  const validAccounts = accounts.filter((a) => !a.error);
+  const handlePrevPage = useCallback(() => {
+    prevPage(selectedAccountId);
+  }, [prevPage, selectedAccountId]);
 
-  // ── Build unique account options for the filter dropdown ──
+  // ── Derived data ──
   const accountOptions = validAccounts.map((a) => ({
     account_id: a.account_id,
     label: `${a.institution_name || 'Bank'} – ${a.name}`,
   }));
 
-  // ── Compute totals from the (possibly filtered) transactions ──
   const totalBalance =
     selectedAccountId === 'all'
       ? validAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0)
@@ -116,6 +178,9 @@ export default function Dashboard() {
     },
   ];
 
+  const isLoading = accountsLoading || txnsLoading;
+  const globalError = accountsError || txnsError;
+
   return (
     <BackgroundLayer>
       {/* Sticky Navbar */}
@@ -153,7 +218,15 @@ export default function Dashboard() {
           <ConnectBankButton onSuccess={handleBankConnected} />
         </div>
 
-        {loading ? (
+        {/* ── Global Error Banner ── */}
+        {globalError && (
+          <div className="flex items-center gap-3 bg-rose-500/10 border border-rose-500/20 rounded-xl px-5 py-3.5">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <p className="text-sm text-rose-300">{globalError}</p>
+          </div>
+        )}
+
+        {isLoading && !transactions.length && !validAccounts.length ? (
           <div className="flex items-center justify-center py-24">
             <div className="flex items-center gap-3 text-slate-400">
               <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -172,7 +245,7 @@ export default function Dashboard() {
                 <label className="text-sm text-slate-400 font-medium">Filter by Account:</label>
                 <select
                   value={selectedAccountId}
-                  onChange={(e) => handleFilterChange(e.target.value)}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
                   className="backdrop-blur-xl bg-white/5 border border-white/10 text-white text-sm rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:border-teal-500/40 transition-all appearance-none cursor-pointer min-w-[240px]"
                   style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
@@ -213,6 +286,66 @@ export default function Dashboard() {
                   <p className="text-xs text-slate-500 mt-2">{card.sub}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Financial Health Score */}
+            <section>
+              <HealthScoreCard
+                healthScore={healthScoreData}
+                loading={healthLoading}
+                error={healthError}
+                refresh={refreshHealthScore}
+                windowDays={healthWindowDays}
+                setWindowDays={setHealthWindowDays}
+                currentBalance={totalBalance}
+              />
+            </section>
+
+            {/* Financial Insights */}
+            <section>
+              <InsightsCard
+                data={insightsData}
+                loading={insightsLoading}
+                error={insightsError}
+                refresh={refreshInsights}
+                mode={insightsMode}
+                setMode={setInsightsMode}
+                prevPeriod={prevPeriod}
+                nextPeriod={nextPeriod}
+                canGoNext={canGoNext}
+                goToToday={goToToday}
+                rollingDays={rollingDays}
+                setRollingDays={setRollingDays}
+                customStart={customStart}
+                customEnd={customEnd}
+                setCustomRange={setCustomRange}
+                applyCustomRange={applyCustomRange}
+              />
+            </section>
+
+            {/* Subscriptions & Cash Flow — side by side on large screens */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section>
+                <SubscriptionsCard
+                  subscriptions={subscriptions}
+                  count={subscriptionCount}
+                  loading={subsLoading}
+                  error={subsError}
+                  refresh={refreshSubscriptions}
+                  recompute={recomputeSubscriptions}
+                  recomputing={subsRecomputing}
+                />
+              </section>
+              <section>
+                <CashflowCard
+                  forecast={cashflowForecast}
+                  loading={cashflowLoading}
+                  error={cashflowError}
+                  refresh={refreshCashflow}
+                  horizonDays={horizonDays}
+                  setHorizonDays={setHorizonDays}
+                />
+              </section>
             </div>
 
             {/* Linked Accounts */}
@@ -256,7 +389,13 @@ export default function Dashboard() {
                   </span>
                 )}
               </h3>
-              <TransactionsTable transactions={transactions} />
+              <TransactionsTable
+                transactions={transactions}
+                pagination={pagination}
+                loading={txnsLoading}
+                onNextPage={handleNextPage}
+                onPrevPage={handlePrevPage}
+              />
             </section>
           </>
         )}

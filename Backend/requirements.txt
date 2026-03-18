@@ -6,3 +6,4 @@ bcrypt==5.0.0
 python-dotenv==1.2.1
 plaid-python==38.3.0
 cryptography==46.0.5
+gunicorn==23.0.0

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import { Link as LinkIcon, Loader2 } from 'lucide-react';
-import API from '../api/axios';
+import { plaidApi } from '../api/plaidApi';
 
 export default function ConnectBankButton({ onSuccess }) {
   const [linkToken, setLinkToken] = useState(null);
@@ -12,10 +12,10 @@ export default function ConnectBankButton({ onSuccess }) {
   const generateLinkToken = async () => {
     setLoading(true);
     try {
-      const res = await API.post('/plaid/create_link_token');
-      setLinkToken(res.data.link_token);
+      const data = await plaidApi.createLinkToken();
+      setLinkToken(data.link_token);
     } catch (err) {
-      console.error('Failed to create link token:', err);
+      console.error('Failed to create link token:', err.message);
     } finally {
       setLoading(false);
     }
@@ -26,20 +26,17 @@ export default function ConnectBankButton({ onSuccess }) {
     async (publicToken, metadata) => {
       setSyncing(true);
       try {
-        // Exchange public token for access token
-        await API.post('/plaid/exchange_token', {
-          public_token: publicToken,
-          institution_id: metadata.institution?.institution_id || '',
-          institution_name: metadata.institution?.name || '',
-        });
+        await plaidApi.exchangeToken(
+          publicToken,
+          metadata.institution?.institution_id || '',
+          metadata.institution?.name || ''
+        );
 
-        // Sync transactions from Plaid
-        await API.post('/plaid/sync_transactions');
+        await plaidApi.syncTransactions();
 
-        // Refresh dashboard data
         if (onSuccess) onSuccess();
       } catch (err) {
-        console.error('Failed to link bank:', err);
+        console.error('Failed to link bank:', err.message);
       } finally {
         setSyncing(false);
         setLinkToken(null);
