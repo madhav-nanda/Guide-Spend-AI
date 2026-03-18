@@ -110,6 +110,13 @@ export default function Login() {
           <p className="text-center text-slate-600 text-xs mt-4">
             Smart Spending. Clear Decisions.
           </p>
+
+          {/* Sandbox Notice */}
+          <div className="mt-6 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-center">
+            <p className="text-amber-300/80 text-xs">
+              ⚠️ Demo environment — no real bank accounts are connected.
+            </p>
+          </div>
         </div>
       </div>
     </BackgroundLayer>

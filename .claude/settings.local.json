@@ -60,7 +60,12 @@
       "Bash(pip install:*)",
       "Bash(taskkill //F //IM python.exe)",
       "Bash(taskkill //F //PID 21180)",
-      "Bash(curl -s http://127.0.0.1:5173/api/health)"
+      "Bash(curl -s http://127.0.0.1:5173/api/health)",
+      "Read(//e//**)",
+      "Read(//c//**)",
+      "Bash(find /e/data_engineer_projects/ai-banking -maxdepth 2 -not -path */node_modules/* -not -path */.venv/* -not -path */venv/* -not -path */__pycache__/* -type d)",
+      "Bash(git rm:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

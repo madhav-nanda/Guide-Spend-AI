@@ -183,6 +183,13 @@ export default function Dashboard() {
 
   return (
     <BackgroundLayer>
+      {/* Sandbox Demo Banner */}
+      <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 text-center">
+        <p className="text-amber-300 text-xs sm:text-sm font-medium">
+          ⚠️ This is a sandbox/demo environment. No real bank accounts are connected. All data is simulated.
+        </p>
+      </div>
+
       {/* Sticky Navbar */}
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-slate-900/70 border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between">
